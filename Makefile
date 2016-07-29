@@ -1,10 +1,16 @@
-all: bin/sniffer
+SRC=$(wildcard src/*.c)
+OBJ=$(patsubst src/%.c,%.o,$(SRC))
 
-bin/sniffer: src/main.c
-	gcc src/main.c -o bin/sniffer -lpcap
+
+all: $(OBJ)
+	gcc $(OBJ) -o bin/sniffer -lpcap
+	rm -rf *.o
+
+$(OBJ):	$(SRC)
+	gcc $(SRC) -c
+
+clean:
+	rm -rf *.o bin/*
 
 run:
 	sudo ./bin/sniffer
-
-clean:
-	rm -rf bin/*

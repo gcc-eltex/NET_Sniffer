@@ -1,13 +1,10 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <sys/ioctl.h>
-#include <pcap.h>
+#include "../header/sniffer.h"
 
 #define DEV_NAME    "enp3s0"    // Имя прослушиваемого интерфейса
-#define LINE_LEN    30          // Количество байт, выводимых в строку
+#define LINE_LEN    22          // Количество байт, выводимых в строку
 
-void sniffer_packet(u_char *args, struct pcap_pkthdr *header, u_char *packet);
+void print_data(u_char *packet, int length);
+void handler_packet(u_char *args, struct pcap_pkthdr *header, u_char *packet);
 
 int main()
 {
@@ -20,9 +17,8 @@ int main()
         printf("ERROR: %s\n", emsg);
         exit(-1);
     }
-
     // Запускаем прослушивание
-    if (pcap_loop(live, -1, (pcap_handler)sniffer_packet, NULL) < 0){
+    if (pcap_loop(live, -1, (pcap_handler)handler_packet, NULL) < 0){
         pcap_close(live);
         printf("ERROR: pcap_close\n");
         exit(-1);
@@ -35,11 +31,58 @@ int main()
  * Функция, вызываемая pcap_loop при получении пакета. Производит 
  * форматированный вывод его содержимого. Прототип обязательно такого вида.
  */ 
-void sniffer_packet(u_char *args, struct pcap_pkthdr *header, u_char *packet)
+void handler_packet(u_char *args, struct pcap_pkthdr *info, u_char *packet)
+{
+    short   proto;          // Инкапсулированный протокол текущего заголовка
+    u_char  *header;        // Указатель на текущий заголовок
+    u_char  *header_prev;   // Указатель на предыдущий заголовок
+    u_short chsum;          // Контрольная сумма
+
+    // Выводим симолы для разделения вывода пакетов
+    for (int i = 0; i< 93; i++)
+        printf("=");
+    printf("\n\n");
+
+    // Поочередно разворачиваем пакет, смещаясь до следующего заголовка
+    header = packet;
+    proto = ethernet_print((struct hdr_ethernet *)header);
+    header += ethernet_getsize((struct hdr_ethernet *)header);
+    while(proto != 0){
+        switch (proto){
+            case TYPE_IP:
+                proto = ip_print((struct hdr_ip *)header);
+                header_prev = header;
+                header += ip_getsize((struct hdr_ip *)header) * 4;
+            break;
+            case TYPE_TCP:
+                proto = tcp_print((struct hdr_tcp *)header);
+                chsum = tcp_checksum(header, header_prev, info->caplen - 
+                                     (int)(header - packet));
+                printf("calc_chsum: %#x\n", chsum);
+                header += tcp_getsize((struct hdr_tcp *)header);
+            break;
+            default:
+                proto = 0;
+        }
+    }
+
+    // Выводим оставшиеся данные
+    print_data(header, info->caplen - (int)(header - packet));
+    printf("\n");
+}
+
+/*
+ * Выводит содерщимое пакета в 2 солбика. Слева в hex, справа в ascii
+ *
+ * @param packet    Указатель на начало данных
+ * @param length    Длина данных в байтах
+ */
+void print_data(u_char *packet, int length)
 {
     int nbyte;                      // Номер байта для печати
-    int length = header->caplen;    // Длина пакета
 
+    // Выводим построчно по LINE_LEN байт в каждой строке
+    printf("DATA:\n");
     for (int line = 0; line < length; line += LINE_LEN){
         /*
          * Выводим в левой части в 16ом формате. Если пакет кончился, то
@@ -68,5 +111,4 @@ void sniffer_packet(u_char *args, struct pcap_pkthdr *header, u_char *packet)
         }
         printf("\n");
     }
-    printf("\n");
 }
